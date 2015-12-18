@@ -30,7 +30,7 @@ These are just guidelines, not rules, use your best judgment and feel free to pr
 
 ### Code of Conduct
 
-This project adheres to the [Contributor Covenant 1.2](http://contributor-covenant.org/version/1/2/0).
+This project adheres to the Contributor Covenant [code of conduct](CODE_OF_CONDUCT.md).
 By participating, you are expected to uphold this code.
 Please report unacceptable behavior to [atom@github.com](mailto:atom@github.com).
 
@@ -255,6 +255,7 @@ Both issue lists are sorted by total number of comments. While not perfect, numb
 * Use the imperative mood ("Move cursor to..." not "Moves cursor to...")
 * Limit the first line to 72 characters or less
 * Reference issues and pull requests liberally
+* When only changing documentation, include `[ci skip]` in the commit description
 * Consider starting the commit message with an applicable emoji:
     * :art: `:art:` when improving the format/structure of the code
     * :racehorse: `:racehorse:` when improving performance
