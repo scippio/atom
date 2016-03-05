@@ -1,4 +1,4 @@
-ipc = require 'ipc'
+{ipcRenderer} = require 'electron'
 path = require 'path'
 {Disposable, CompositeDisposable} = require 'event-kit'
 Grim = require 'grim'
@@ -74,6 +74,8 @@ class WorkspaceElement extends HTMLElement
       left: @views.getView(@model.panelContainers.left)
       right: @views.getView(@model.panelContainers.right)
       bottom: @views.getView(@model.panelContainers.bottom)
+      header: @views.getView(@model.panelContainers.header)
+      footer: @views.getView(@model.panelContainers.footer)
       modal: @views.getView(@model.panelContainers.modal)
 
     @horizontalAxis.insertBefore(@panelContainers.left, @verticalAxis)
@@ -81,6 +83,9 @@ class WorkspaceElement extends HTMLElement
 
     @verticalAxis.insertBefore(@panelContainers.top, @paneContainer)
     @verticalAxis.appendChild(@panelContainers.bottom)
+
+    @insertBefore(@panelContainers.header, @horizontalAxis)
+    @appendChild(@panelContainers.footer)
 
     @appendChild(@panelContainers.modal)
 
@@ -99,11 +104,19 @@ class WorkspaceElement extends HTMLElement
 
   focusPaneViewOnRight: -> @paneContainer.focusPaneViewOnRight()
 
+  moveActiveItemToPaneAbove: (params) -> @paneContainer.moveActiveItemToPaneAbove(params)
+
+  moveActiveItemToPaneBelow: (params) -> @paneContainer.moveActiveItemToPaneBelow(params)
+
+  moveActiveItemToPaneOnLeft: (params) -> @paneContainer.moveActiveItemToPaneOnLeft(params)
+
+  moveActiveItemToPaneOnRight: (params) -> @paneContainer.moveActiveItemToPaneOnRight(params)
+
   runPackageSpecs: ->
     if activePath = @workspace.getActivePaneItem()?.getPath?()
       [projectPath] = @project.relativizePath(activePath)
     else
       [projectPath] = @project.getPaths()
-    ipc.send('run-package-specs', path.join(projectPath, 'spec')) if projectPath
+    ipcRenderer.send('run-package-specs', path.join(projectPath, 'spec')) if projectPath
 
 module.exports = WorkspaceElement = document.registerElement 'atom-workspace', prototype: WorkspaceElement.prototype
