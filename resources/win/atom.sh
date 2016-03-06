@@ -4,26 +4,12 @@ while getopts ":fhtvw-:" opt; do
   case "$opt" in
     -)
       case "${OPTARG}" in
-        wait)
-          WAIT=1
-          ;;
-        help|version)
-          REDIRECT_STDERR=1
+        foreground|help|test|version|wait)
           EXPECT_OUTPUT=1
-          ;;
-        foreground|test)
-          EXPECT_OUTPUT=1
-          ;;
+        ;;
       esac
       ;;
-    w)
-      WAIT=1
-      ;;
-    h|v)
-      REDIRECT_STDERR=1
-      EXPECT_OUTPUT=1
-      ;;
-    f|t)
+    f|h|t|v|w)
       EXPECT_OUTPUT=1
       ;;
   esac
@@ -31,19 +17,9 @@ done
 
 directory=$(dirname "$0")
 
-WINPS=`ps | grep -i $$`
-PID=`echo $WINPS | cut -d' ' -f 4`
-
 if [ $EXPECT_OUTPUT ]; then
   export ELECTRON_ENABLE_LOGGING=1
-  "$directory/../../atom.exe" --executed-from="$(pwd)" --pid=$PID "$@"
+  "$directory/../../atom.exe" "$@"
 else
   "$directory/../app/apm/bin/node.exe" "$directory/atom.js" "$@"
-fi
-
-# If the wait flag is set, don't exit this process until Atom tells it to.
-if [ $WAIT ]; then
-  while true; do
-    sleep 1
-  done
 fi

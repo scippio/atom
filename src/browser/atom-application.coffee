@@ -2,10 +2,14 @@ AtomWindow = require './atom-window'
 ApplicationMenu = require './application-menu'
 AtomProtocolHandler = require './atom-protocol-handler'
 AutoUpdateManager = require './auto-update-manager'
+BrowserWindow = require 'browser-window'
 StorageFolder = require '../storage-folder'
-ipcHelpers = require '../ipc-helpers'
-{BrowserWindow, Menu, app, dialog, ipcMain, shell} = require 'electron'
+Menu = require 'menu'
+app = require 'app'
+dialog = require 'dialog'
+shell = require 'shell'
 fs = require 'fs-plus'
+ipc = require 'ipc'
 path = require 'path'
 os = require 'os'
 net = require 'net'
@@ -47,7 +51,7 @@ class AtomApplication
     client = net.connect {path: options.socketPath}, ->
       client.write JSON.stringify(options), ->
         client.end()
-        app.quit()
+        app.terminate()
 
     client.on 'error', createAtomApplication
 
@@ -61,7 +65,7 @@ class AtomApplication
   exit: (status) -> app.exit(status)
 
   constructor: (options) ->
-    {@resourcePath, @devResourcePath, @version, @devMode, @safeMode, @socketPath, timeout, clearWindowState} = options
+    {@resourcePath, @devResourcePath, @version, @devMode, @safeMode, @socketPath, timeout} = options
 
     @socketPath = null if options.test
 
@@ -85,16 +89,16 @@ class AtomApplication
     else
       @loadState(options) or @openPath(options)
 
-  openWithOptions: ({initialPaths, pathsToOpen, executedFrom, urlsToOpen, test, pidToKillWhenClosed, devMode, safeMode, newWindow, logFile, profileStartup, timeout, clearWindowState, addToLastWindow}) ->
+  openWithOptions: ({pathsToOpen, executedFrom, urlsToOpen, test, pidToKillWhenClosed, devMode, safeMode, newWindow, logFile, profileStartup, timeout}) ->
     if test
       @runTests({headless: true, devMode, @resourcePath, executedFrom, pathsToOpen, logFile, timeout})
     else if pathsToOpen.length > 0
-      @openPaths({initialPaths, pathsToOpen, executedFrom, pidToKillWhenClosed, newWindow, devMode, safeMode, profileStartup, clearWindowState, addToLastWindow})
+      @openPaths({pathsToOpen, executedFrom, pidToKillWhenClosed, newWindow, devMode, safeMode, profileStartup})
     else if urlsToOpen.length > 0
       @openUrl({urlToOpen, devMode, safeMode}) for urlToOpen in urlsToOpen
     else
       # Always open a editor window if this is the first instance of Atom.
-      @openPath({initialPaths, pidToKillWhenClosed, newWindow, devMode, safeMode, profileStartup, clearWindowState, addToLastWindow})
+      @openPath({pidToKillWhenClosed, newWindow, devMode, safeMode, profileStartup})
 
   # Public: Removes the {AtomWindow} from the global window list.
   removeWindow: (window) ->
@@ -175,6 +179,7 @@ class AtomApplication
 
     @on 'application:open-documentation', -> shell.openExternal('https://atom.io/docs/latest/?app')
     @on 'application:open-discussions', -> shell.openExternal('https://discuss.atom.io')
+    @on 'application:open-roadmap', -> shell.openExternal('https://atom.io/roadmap?app')
     @on 'application:open-faq', -> shell.openExternal('https://atom.io/faq')
     @on 'application:open-terms-of-use', -> shell.openExternal('https://atom.io/terms')
     @on 'application:report-issue', -> shell.openExternal('https://github.com/atom/atom/blob/master/CONTRIBUTING.md#submitting-issues')
@@ -207,6 +212,7 @@ class AtomApplication
     @openPathOnEvent('application:open-license', path.join(process.resourcesPath, 'LICENSE.md'))
 
     app.on 'before-quit', =>
+      @saveState(false)
       @quitting = true
 
     app.on 'will-quit', =>
@@ -226,7 +232,7 @@ class AtomApplication
       @emit('application:new-window')
 
     # A request from the associated render process to open a new render process.
-    ipcMain.on 'open', (event, options) =>
+    ipc.on 'open', (event, options) =>
       window = @windowForEvent(event)
       if options?
         if typeof options.pathsToOpen is 'string'
@@ -239,79 +245,43 @@ class AtomApplication
       else
         @promptForPathToOpen('all', {window})
 
-    ipcMain.on 'update-application-menu', (event, template, keystrokesByCommand) =>
+    ipc.on 'update-application-menu', (event, template, keystrokesByCommand) =>
       win = BrowserWindow.fromWebContents(event.sender)
       @applicationMenu.update(win, template, keystrokesByCommand)
 
-    ipcMain.on 'run-package-specs', (event, packageSpecPath) =>
+    ipc.on 'run-package-specs', (event, packageSpecPath) =>
       @runTests({resourcePath: @devResourcePath, pathsToOpen: [packageSpecPath], headless: false})
 
-    ipcMain.on 'command', (event, command) =>
+    ipc.on 'command', (event, command) =>
       @emit(command)
 
-    ipcMain.on 'window-command', (event, command, args...) ->
+    ipc.on 'window-command', (event, command, args...) ->
       win = BrowserWindow.fromWebContents(event.sender)
       win.emit(command, args...)
 
-    ipcMain.on 'call-window-method', (event, method, args...) ->
+    ipc.on 'call-window-method', (event, method, args...) ->
       win = BrowserWindow.fromWebContents(event.sender)
       win[method](args...)
 
-    ipcMain.on 'pick-folder', (event, responseChannel) =>
+    ipc.on 'pick-folder', (event, responseChannel) =>
       @promptForPath "folder", (selectedPaths) ->
         event.sender.send(responseChannel, selectedPaths)
 
-    ipcHelpers.respondTo 'set-window-size', (win, width, height) ->
-      win.setSize(width, height)
-
-    ipcHelpers.respondTo 'set-window-position', (win, x, y) ->
-      win.setPosition(x, y)
-
-    ipcHelpers.respondTo 'center-window', (win) ->
-      win.center()
-
-    ipcHelpers.respondTo 'focus-window', (win) ->
-      win.focus()
-
-    ipcHelpers.respondTo 'show-window', (win) ->
-      win.show()
-
-    ipcHelpers.respondTo 'hide-window', (win) ->
-      win.hide()
-
-    ipcHelpers.respondTo 'get-temporary-window-state', (win) ->
-      win.temporaryState
-
-    ipcHelpers.respondTo 'set-temporary-window-state', (win, state) ->
-      win.temporaryState = state
-
-    ipcMain.on 'did-cancel-window-unload', =>
+    ipc.on 'did-cancel-window-unload', =>
       @quitting = false
 
     clipboard = require '../safe-clipboard'
-    ipcMain.on 'write-text-to-selection-clipboard', (event, selectedText) ->
+    ipc.on 'write-text-to-selection-clipboard', (event, selectedText) ->
       clipboard.writeText(selectedText, 'selection')
 
-    ipcMain.on 'write-to-stdout', (event, output) ->
+    ipc.on 'write-to-stdout', (event, output) ->
       process.stdout.write(output)
 
-    ipcMain.on 'write-to-stderr', (event, output) ->
+    ipc.on 'write-to-stderr', (event, output) ->
       process.stderr.write(output)
 
-    ipcMain.on 'add-recent-document', (event, filename) ->
+    ipc.on 'add-recent-document', (event, filename) ->
       app.addRecentDocument(filename)
-
-    ipcMain.on 'execute-javascript-in-dev-tools', (event, code) ->
-      event.sender.devToolsWebContents?.executeJavaScript(code)
-
-    ipcMain.on 'check-for-update', =>
-      @autoUpdateManager.check()
-
-    ipcMain.on 'get-auto-update-manager-state', (event) =>
-      event.returnValue = @autoUpdateManager.getState()
-
-    ipcMain.on 'execute-javascript-in-dev-tools', (event, code) ->
-      event.sender.devToolsWebContents?.executeJavaScript(code)
 
   setupDockMenu: ->
     if process.platform is 'darwin'
@@ -380,7 +350,7 @@ class AtomApplication
     _.find @windows, (atomWindow) ->
       atomWindow.devMode is devMode and atomWindow.containsPaths(pathsToOpen)
 
-  # Returns the {AtomWindow} for the given ipcMain event.
+  # Returns the {AtomWindow} for the given ipc event.
   windowForEvent: ({sender}) ->
     window = BrowserWindow.fromWebContents(sender)
     _.find @windows, ({browserWindow}) -> window is browserWindow
@@ -417,9 +387,8 @@ class AtomApplication
   #   :safeMode - Boolean to control the opened window's safe mode.
   #   :profileStartup - Boolean to control creating a profile of the startup time.
   #   :window - {AtomWindow} to open file paths in.
-  #   :addToLastWindow - Boolean of whether this should be opened in last focused window.
-  openPath: ({initialPaths, pathToOpen, pidToKillWhenClosed, newWindow, devMode, safeMode, profileStartup, window, clearWindowState, addToLastWindow} = {}) ->
-    @openPaths({initialPaths, pathsToOpen: [pathToOpen], pidToKillWhenClosed, newWindow, devMode, safeMode, profileStartup, window, clearWindowState, addToLastWindow})
+  openPath: ({pathToOpen, pidToKillWhenClosed, newWindow, devMode, safeMode, profileStartup, window} = {}) ->
+    @openPaths({pathsToOpen: [pathToOpen], pidToKillWhenClosed, newWindow, devMode, safeMode, profileStartup, window})
 
   # Public: Opens multiple paths, in existing windows if possible.
   #
@@ -431,12 +400,10 @@ class AtomApplication
   #   :safeMode - Boolean to control the opened window's safe mode.
   #   :windowDimensions - Object with height and width keys.
   #   :window - {AtomWindow} to open file paths in.
-  #   :addToLastWindow - Boolean of whether this should be opened in last focused window.
-  openPaths: ({initialPaths, pathsToOpen, executedFrom, pidToKillWhenClosed, newWindow, devMode, safeMode, windowDimensions, profileStartup, window, clearWindowState, addToLastWindow}={}) ->
+  openPaths: ({pathsToOpen, executedFrom, pidToKillWhenClosed, newWindow, devMode, safeMode, windowDimensions, profileStartup, window}={}) ->
     devMode = Boolean(devMode)
     safeMode = Boolean(safeMode)
-    clearWindowState = Boolean(clearWindowState)
-    locationsToOpen = (@locationForPathToOpen(pathToOpen, executedFrom, addToLastWindow) for pathToOpen in pathsToOpen)
+    locationsToOpen = (@locationForPathToOpen(pathToOpen, executedFrom) for pathToOpen in pathsToOpen)
     pathsToOpen = (locationToOpen.pathToOpen for locationToOpen in locationsToOpen)
 
     unless pidToKillWhenClosed or newWindow
@@ -445,7 +412,6 @@ class AtomApplication
       unless existingWindow?
         if currentWindow = window ? @lastFocusedWindow
           existingWindow = currentWindow if (
-            addToLastWindow or
             currentWindow.devMode is devMode and
             (
               stats.every((stat) -> stat.isFile?()) or
@@ -469,7 +435,7 @@ class AtomApplication
       windowInitializationScript ?= require.resolve('../initialize-application-window')
       resourcePath ?= @resourcePath
       windowDimensions ?= @getDimensionsForNewWindow()
-      openedWindow = new AtomWindow({initialPaths, locationsToOpen, windowInitializationScript, resourcePath, devMode, safeMode, windowDimensions, profileStartup, clearWindowState})
+      openedWindow = new AtomWindow({locationsToOpen, windowInitializationScript, resourcePath, devMode, safeMode, windowDimensions, profileStartup})
 
     if pidToKillWhenClosed?
       @pidsToOpenWindows[pidToKillWhenClosed] = openedWindow
@@ -506,14 +472,13 @@ class AtomApplication
         if loadSettings = window.getLoadSettings()
           states.push(initialPaths: loadSettings.initialPaths)
     if states.length > 0 or allowEmpty
-      @storageFolder.storeSync('application.json', states)
+      @storageFolder.store('application.json', states)
 
   loadState: (options) ->
     if (states = @storageFolder.load('application.json'))?.length > 0
       for state in states
         @openWithOptions(_.extend(options, {
-          initialPaths: state.initialPaths
-          pathsToOpen: state.initialPaths.filter (directoryPath) -> fs.isDirectorySync(directoryPath)
+          pathsToOpen: state.initialPaths
           urlsToOpen: []
           devMode: @devMode
           safeMode: @safeMode
@@ -546,7 +511,7 @@ class AtomApplication
       if pack.urlMain
         packagePath = @packages.resolvePackagePath(packageName)
         windowInitializationScript = path.resolve(packagePath, pack.urlMain)
-        windowDimensions = @getDimensionsForNewWindow()
+        windowDimensions = @focusedWindow()?.getDimensions()
         new AtomWindow({windowInitializationScript, @resourcePath, devMode, safeMode, urlToOpen, windowDimensions})
       else
         console.log "Package '#{pack.name}' does not have a url main: #{urlToOpen}"
@@ -615,7 +580,7 @@ class AtomApplication
     catch error
       require.resolve(path.resolve(__dirname, '..', '..', 'spec', 'jasmine-test-runner'))
 
-  locationForPathToOpen: (pathToOpen, executedFrom='', forceAddToWindow) ->
+  locationForPathToOpen: (pathToOpen, executedFrom='') ->
     return {pathToOpen} unless pathToOpen
 
     pathToOpen = pathToOpen.replace(/[:\s]+$/, '')
@@ -631,7 +596,7 @@ class AtomApplication
     unless url.parse(pathToOpen).protocol?
       pathToOpen = path.resolve(executedFrom, fs.normalize(pathToOpen))
 
-    {pathToOpen, initialLine, initialColumn, forceAddToWindow}
+    {pathToOpen, initialLine, initialColumn}
 
   # Opens a native dialog to prompt the user for a path.
   #

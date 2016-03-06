@@ -10,8 +10,7 @@ var babelVersionDirectory = null
 var PREFIXES = [
   '/** @babel */',
   '"use babel"',
-  '\'use babel\'',
-  '/* @flow */'
+  '\'use babel\''
 ]
 
 var PREFIX_LENGTH = Math.max.apply(Math, PREFIXES.map(function (prefix) {

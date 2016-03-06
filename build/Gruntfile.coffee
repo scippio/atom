@@ -34,10 +34,23 @@ module.exports = (grunt) ->
   grunt.file.setBase(path.resolve('..'))
 
   # Options
-  [defaultChannel, releaseBranch] = getDefaultChannelAndReleaseBranch(packageJson.version)
   installDir = grunt.option('install-dir')
-  buildDir = path.resolve(grunt.option('build-dir') ? 'out')
-  channel = grunt.option('channel') ? defaultChannel
+  buildDir = grunt.option('build-dir')
+  buildDir ?= path.join(os.tmpdir(), 'atom-build')
+  buildDir = path.resolve(buildDir)
+
+  channel = grunt.option('channel')
+  releasableBranches = ['stable', 'beta']
+  if process.env.APPVEYOR and not process.env.APPVEYOR_PULL_REQUEST_NUMBER
+    channel ?= process.env.APPVEYOR_REPO_BRANCH if process.env.APPVEYOR_REPO_BRANCH in releasableBranches
+
+  if process.env.TRAVIS and not process.env.TRAVIS_PULL_REQUEST
+    channel ?= process.env.TRAVIS_BRANCH if process.env.TRAVIS_BRANCH in releasableBranches
+
+  if process.env.JANKY_BRANCH
+    channel ?= process.env.JANKY_BRANCH if process.env.JANKY_BRANCH in releasableBranches
+
+  channel ?= 'dev'
 
   metadata = packageJson
   appName = packageJson.productName
@@ -108,8 +121,6 @@ module.exports = (grunt) ->
       ext: '.css'
 
   prebuildLessConfig =
-    options:
-      cachePath: path.join(homeDir, '.atom', 'compile-cache', 'prebuild-less', require('less-cache/package.json').version)
     src: [
       'static/**/*.less'
     ]
@@ -176,7 +187,7 @@ module.exports = (grunt) ->
     pkg: grunt.file.readJSON('package.json')
 
     atom: {
-      appName, channel, metadata, releaseBranch,
+      appName, channel, metadata,
       appFileName, apmFileName,
       appDir, buildDir, contentsDir, installDir, shellAppDir, symbolsDir,
     }
@@ -282,7 +293,7 @@ module.exports = (grunt) ->
   ciTasks.push('download-electron-chromedriver')
   ciTasks.push('build')
   ciTasks.push('fingerprint')
-  ciTasks.push('dump-symbols') if process.platform is 'darwin'
+  ciTasks.push('dump-symbols') if process.platform isnt 'win32'
   ciTasks.push('set-version', 'check-licenses', 'lint', 'generate-asar')
   ciTasks.push('mkdeb') if process.platform is 'linux'
   ciTasks.push('codesign:exe') if process.platform is 'win32' and not process.env.CI
@@ -297,20 +308,3 @@ module.exports = (grunt) ->
   unless process.platform is 'linux' or grunt.option('no-install')
     defaultTasks.push 'install'
   grunt.registerTask('default', defaultTasks)
-
-getDefaultChannelAndReleaseBranch = (version) ->
-  if version.match(/dev/) or isBuildingPR()
-    channel = 'dev'
-    releaseBranch = null
-  else
-    if version.match(/beta/)
-      channel = 'beta'
-    else
-      channel = 'stable'
-
-    minorVersion = version.match(/^\d\.\d/)[0]
-    releaseBranch = "#{minorVersion}-releases"
-  [channel, releaseBranch]
-
-isBuildingPR = ->
-  process.env.APPVEYOR_PULL_REQUEST_NUMBER? or process.env.TRAVIS_PULL_REQUEST?

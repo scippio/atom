@@ -33,6 +33,7 @@ class TokenizedLine
   endOfLineInvisibles: null
   lineIsWhitespaceOnly: false
   firstNonWhitespaceIndex: 0
+  foldable: false
 
   constructor: (properties) ->
     @id = idCounter++
@@ -491,19 +492,15 @@ class TokenizedLine
         @endOfLineInvisibles.push(eol) if eol
 
   isComment: ->
-    return @isCommentLine if @isCommentLine?
-
-    @isCommentLine = false
     iterator = @getTokenIterator()
     while iterator.next()
       scopes = iterator.getScopes()
       continue if scopes.length is 1
+      continue unless NonWhitespaceRegex.test(iterator.getText())
       for scope in scopes
-        if CommentScopeRegex.test(scope)
-          @isCommentLine = true
-          break
+        return true if CommentScopeRegex.test(scope)
       break
-    @isCommentLine
+    false
 
   isOnlyWhitespace: ->
     @lineIsWhitespaceOnly

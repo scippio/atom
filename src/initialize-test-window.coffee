@@ -4,17 +4,17 @@ cloneObject = (object) ->
   clone
 
 module.exports = ({blobStore}) ->
-  {crashReporter, remote} = require 'electron'
   # Start the crash reporter before anything else.
-  crashReporter.start(productName: 'Atom', companyName: 'GitHub', submitURL: 'http://54.249.141.255:1127/post')
+  require('crash-reporter').start(productName: 'Atom', companyName: 'GitHub')
+  remote = require 'remote'
 
   exitWithStatusCode = (status) ->
-    remote.app.emit('will-quit')
+    remote.require('app').emit('will-quit')
     remote.process.exit(status)
 
   try
     path = require 'path'
-    {ipcRenderer} = require 'electron'
+    ipc = require 'ipc'
     {getWindowLoadSettings} = require './window-load-settings-helpers'
     AtomEnvironment = require '../src/atom-environment'
     ApplicationDelegate = require '../src/application-delegate'
@@ -29,15 +29,15 @@ module.exports = ({blobStore}) ->
     handleKeydown = (event) ->
       # Reload: cmd-r / ctrl-r
       if (event.metaKey or event.ctrlKey) and event.keyCode is 82
-        ipcRenderer.send('call-window-method', 'reload')
+        ipc.send('call-window-method', 'restart')
 
       # Toggle Dev Tools: cmd-alt-i / ctrl-alt-i
       if (event.metaKey or event.ctrlKey) and event.altKey and event.keyCode is 73
-        ipcRenderer.send('call-window-method', 'toggleDevTools')
+        ipc.send('call-window-method', 'toggleDevTools')
 
       # Reload: cmd-w / ctrl-w
       if (event.metaKey or event.ctrlKey) and event.keyCode is 87
-        ipcRenderer.send('call-window-method', 'close')
+        ipc.send('call-window-method', 'close')
 
     window.addEventListener('keydown', handleKeydown, true)
 
@@ -68,8 +68,7 @@ module.exports = ({blobStore}) ->
       logFile, headless, testPaths, buildAtomEnvironment, buildDefaultApplicationDelegate, legacyTestRunner
     })
 
-    promise.then (statusCode) ->
-      exitWithStatusCode(statusCode) if getWindowLoadSettings().headless
+    promise.then(exitWithStatusCode) if getWindowLoadSettings().headless
   catch error
     if getWindowLoadSettings().headless
       console.error(error.stack ? error)

@@ -6,7 +6,7 @@ class StorageFolder
   constructor: (containingPath) ->
     @path = path.join(containingPath, "storage") if containingPath?
 
-  storeSync: (name, object) ->
+  store: (name, object) ->
     return unless @path?
 
     fs.writeFileSync(@pathForKey(name), JSON.stringify(object), 'utf8')

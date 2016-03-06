@@ -54,7 +54,7 @@
   }
 
   function handleSetupError (error) {
-    var currentWindow = require('electron').remote.getCurrentWindow()
+    var currentWindow = require('remote').getCurrentWindow()
     currentWindow.setSize(800, 600)
     currentWindow.center()
     currentWindow.show()
@@ -71,10 +71,9 @@
     ModuleCache.add(loadSettings.resourcePath)
 
     // Start the crash reporter before anything else.
-    require('electron').crashReporter.start({
+    require('crash-reporter').start({
       productName: 'Atom',
       companyName: 'GitHub',
-      submitURL: 'http://54.249.141.255:1127/post',
       // By explicitly passing the app version here, we could save the call
       // of "require('remote').require('app').getVersion()".
       extra: {_version: loadSettings.appVersion}
@@ -84,9 +83,8 @@
     setupCsonCache(CompileCache.getCacheDirectory())
 
     var initialize = require(loadSettings.windowInitializationScript)
-    return initialize({blobStore: blobStore}).then(function () {
-      require('electron').ipcRenderer.send('window-command', 'window:loaded')
-    })
+    initialize({blobStore: blobStore})
+    require('ipc').sendChannel('window-command', 'window:loaded')
   }
 
   function setupCsonCache (cacheDir) {
@@ -114,15 +112,19 @@
   function profileStartup (loadSettings, initialTime) {
     function profile () {
       console.profile('startup')
-      var startTime = Date.now()
-      setupWindow(loadSettings).then(function () {
+      try {
+        var startTime = Date.now()
+        setupWindow(loadSettings)
         setLoadTime(Date.now() - startTime + initialTime)
+      } catch (error) {
+        handleSetupError(error)
+      } finally {
         console.profileEnd('startup')
         console.log('Switch to the Profiles tab to view the created startup profile')
-      })
+      }
     }
 
-    var currentWindow = require('electron').remote.getCurrentWindow()
+    var currentWindow = require('remote').getCurrentWindow()
     if (currentWindow.devToolsWebContents) {
       profile()
     } else {
@@ -143,6 +145,31 @@
     }
   }
 
+  function setupWindowBackground () {
+    if (loadSettings && loadSettings.isSpec) {
+      return
+    }
+
+    var backgroundColor = window.localStorage.getItem('atom:window-background-color')
+    if (!backgroundColor) {
+      return
+    }
+
+    var backgroundStylesheet = document.createElement('style')
+    backgroundStylesheet.type = 'text/css'
+    backgroundStylesheet.innerText = 'html, body { background: ' + backgroundColor + ' !important; }'
+    document.head.appendChild(backgroundStylesheet)
+
+    // Remove once the page loads
+    window.addEventListener('load', function loadWindow () {
+      window.removeEventListener('load', loadWindow, false)
+      setTimeout(function () {
+        backgroundStylesheet.remove()
+        backgroundStylesheet = null
+      }, 1000)
+    }, false)
+  }
+
   var setupAtomHome = function () {
     if (process.env.ATOM_HOME) {
       return
@@ -158,4 +185,5 @@
 
   parseLoadSettings()
   setupAtomHome()
+  setupWindowBackground()
 })()

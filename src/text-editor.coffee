@@ -11,7 +11,6 @@ Selection = require './selection'
 TextMateScopeSelector = require('first-mate').ScopeSelector
 {Directory} = require "pathwatcher"
 GutterContainer = require './gutter-container'
-TextEditorElement = require './text-editor-element'
 
 # Essential: This class represents all essential editing state for a single
 # {TextBuffer}, including cursor and selection positions, folds, and soft wraps.
@@ -62,10 +61,6 @@ class TextEditor extends Model
   suppressSelectionMerging: false
   selectionFlashDuration: 500
   gutterContainer: null
-  editorElement: null
-
-  Object.defineProperty @prototype, "element",
-    get: -> @getElement()
 
   @deserialize: (state, atomEnvironment) ->
     try
@@ -87,10 +82,7 @@ class TextEditor extends Model
     state.project = atomEnvironment.project
     state.assert = atomEnvironment.assert.bind(atomEnvironment)
     state.applicationDelegate = atomEnvironment.applicationDelegate
-    editor = new this(state)
-    disposable = atomEnvironment.textEditors.add(editor)
-    editor.onDidDestroy -> disposable.dispose()
-    editor
+    new this(state)
 
   constructor: (params={}) ->
     super
@@ -100,7 +92,7 @@ class TextEditor extends Model
       softWrapped, @displayBuffer, @selectionsMarkerLayer, buffer, suppressCursorCreation,
       @mini, @placeholderText, lineNumberGutterVisible, largeFileMode, @config,
       @notificationManager, @packageManager, @clipboard, @viewRegistry, @grammarRegistry,
-      @project, @assert, @applicationDelegate, grammar, showInvisibles, @autoHeight, @scrollPastEnd
+      @project, @assert, @applicationDelegate, @pending
     } = params
 
     throw new Error("Must pass a config parameter when constructing TextEditors") unless @config?
@@ -117,17 +109,11 @@ class TextEditor extends Model
     @emitter = new Emitter
     @disposables = new CompositeDisposable
     @cursors = []
-    @cursorsByMarkerId = new Map
     @selections = []
-    @autoHeight ?= true
-    @scrollPastEnd ?= true
-    @hasTerminatedPendingState = false
-
-    showInvisibles ?= true
 
     buffer ?= new TextBuffer
     @displayBuffer ?= new DisplayBuffer({
-      buffer, tabLength, softWrapped, ignoreInvisibles: @mini or not showInvisibles, largeFileMode,
+      buffer, tabLength, softWrapped, ignoreInvisibles: @mini, largeFileMode,
       @config, @assert, @grammarRegistry, @packageManager
     })
     @buffer = @displayBuffer.buffer
@@ -156,9 +142,6 @@ class TextEditor extends Model
       priority: 0
       visible: lineNumberGutterVisible
 
-    if grammar?
-      @setGrammar(grammar)
-
   serialize: ->
     deserializer: 'TextEditor'
     id: @id
@@ -167,6 +150,7 @@ class TextEditor extends Model
     firstVisibleScreenColumn: @getFirstVisibleScreenColumn()
     displayBuffer: @displayBuffer.serialize()
     selectionsMarkerLayerId: @selectionsMarkerLayer.id
+    pending: @isPending()
 
   subscribeToBuffer: ->
     @buffer.retain()
@@ -178,17 +162,11 @@ class TextEditor extends Model
     @disposables.add @buffer.onDidChangeEncoding =>
       @emitter.emit 'did-change-encoding', @getEncoding()
     @disposables.add @buffer.onDidDestroy => @destroy()
-    @disposables.add @buffer.onDidChangeModified =>
-      @terminatePendingState() if not @hasTerminatedPendingState and @buffer.isModified()
+    if @pending
+      @disposables.add @buffer.onDidChangeModified =>
+        @terminatePendingState() if @buffer.isModified()
 
     @preserveCursorPositionOnBufferReload()
-
-  terminatePendingState: ->
-    @emitter.emit 'did-terminate-pending-state' if not @hasTerminatedPendingState
-    @hasTerminatedPendingState = true
-
-  onDidTerminatePendingState: (callback) ->
-    @emitter.on 'did-terminate-pending-state', callback
 
   subscribeToDisplayBuffer: ->
     @disposables.add @selectionsMarkerLayer.onDidCreateMarker @addSelection.bind(this)
@@ -519,7 +497,6 @@ class TextEditor extends Model
     newEditor = new TextEditor({
       @buffer, displayBuffer, selectionsMarkerLayer, @tabLength, softTabs,
       suppressCursorCreation: true, @config, @notificationManager, @packageManager,
-      @firstVisibleScreenRow, @firstVisibleScreenColumn,
       @clipboard, @viewRegistry, @grammarRegistry, @project, @assert, @applicationDelegate
     })
     newEditor
@@ -596,6 +573,13 @@ class TextEditor extends Model
   getEditorWidthInChars: ->
     @displayBuffer.getEditorWidthInChars()
 
+  onDidTerminatePendingState: (callback) ->
+    @emitter.on 'did-terminate-pending-state', callback
+
+  terminatePendingState: ->
+    return if not @pending
+    @pending = false
+    @emitter.emit 'did-terminate-pending-state'
 
   ###
   Section: File Details
@@ -679,6 +663,9 @@ class TextEditor extends Model
 
   # Essential: Returns {Boolean} `true` if this editor has no content.
   isEmpty: -> @buffer.isEmpty()
+
+  # Returns {Boolean} `true` if this editor is pending and `false` if it is permanent.
+  isPending: -> Boolean(@pending)
 
   # Copies the current file path to the native clipboard.
   copyPathToClipboard: (relative = false) ->
@@ -1956,18 +1943,10 @@ class TextEditor extends Model
   getCursorsOrderedByBufferPosition: ->
     @getCursors().sort (a, b) -> a.compare(b)
 
-  cursorsForScreenRowRange: (startScreenRow, endScreenRow) ->
-    cursors = []
-    for marker in @selectionsMarkerLayer.findMarkers(intersectsScreenRowRange: [startScreenRow, endScreenRow])
-      if cursor = @cursorsByMarkerId.get(marker.id)
-        cursors.push(cursor)
-    cursors
-
   # Add a cursor based on the given {TextEditorMarker}.
   addCursor: (marker) ->
     cursor = new Cursor(editor: this, marker: marker, config: @config)
     @cursors.push(cursor)
-    @cursorsByMarkerId.set(marker.id, cursor)
     @decorateMarker(marker, type: 'line-number', class: 'cursor-line')
     @decorateMarker(marker, type: 'line-number', class: 'cursor-line-no-selection', onlyHead: true, onlyEmpty: true)
     @decorateMarker(marker, type: 'line', class: 'cursor-line', onlyEmpty: true)
@@ -2466,7 +2445,6 @@ class TextEditor extends Model
   removeSelection: (selection) ->
     _.remove(@cursors, selection.cursor)
     _.remove(@selections, selection)
-    @cursorsByMarkerId.delete(selection.cursor.marker.id)
     @emitter.emit 'did-remove-cursor', selection.cursor
     @emitter.emit 'did-remove-selection', selection
 
@@ -2481,7 +2459,6 @@ class TextEditor extends Model
     selections = @getSelections()
     if selections.length > 1
       selection.destroy() for selection in selections[1...(selections.length)]
-      selections[0].autoscroll(center: true)
       true
     else
       false
@@ -2951,7 +2928,8 @@ class TextEditor extends Model
   #
   # Returns a {Boolean}.
   isFoldableAtBufferRow: (bufferRow) ->
-    @displayBuffer.isFoldableAtBufferRow(bufferRow)
+    # @languageMode.isFoldableAtBufferRow(bufferRow)
+    @displayBuffer.tokenizedBuffer.tokenizedLineForRow(bufferRow)?.foldable ? false
 
   # Extended: Determine whether the given row in screen coordinates is foldable.
   #
@@ -3154,10 +3132,6 @@ class TextEditor extends Model
   Section: TextEditor Rendering
   ###
 
-  # Get the Element for the editor.
-  getElement: ->
-    @editorElement ?= new TextEditorElement().initialize(this, atom, @autoHeight, @scrollPastEnd)
-
   # Essential: Retrieves the greyed out placeholder of a mini editor.
   #
   # Returns a {String}.
@@ -3231,8 +3205,8 @@ class TextEditor extends Model
   # top of the visible area.
   setFirstVisibleScreenRow: (screenRow, fromView) ->
     unless fromView
-      maxScreenRow = @getScreenLineCount() - 1
-      unless @config.get('editor.scrollPastEnd') and @scrollPastEnd
+      maxScreenRow = @getLineCount() - 1
+      unless @config.get('editor.scrollPastEnd')
         height = @displayBuffer.getHeight()
         lineHeightInPixels = @displayBuffer.getLineHeightInPixels()
         if height? and lineHeightInPixels?
@@ -3249,7 +3223,7 @@ class TextEditor extends Model
     height = @displayBuffer.getHeight()
     lineHeightInPixels = @displayBuffer.getLineHeightInPixels()
     if height? and lineHeightInPixels?
-      Math.min(@firstVisibleScreenRow + Math.floor(height / lineHeightInPixels), @getScreenLineCount() - 1)
+      Math.min(@firstVisibleScreenRow + Math.floor(height / lineHeightInPixels), @getLineCount() - 1)
     else
       null
 

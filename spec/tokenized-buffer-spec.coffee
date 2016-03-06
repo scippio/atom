@@ -202,7 +202,8 @@ describe "TokenizedBuffer", ->
             expect(tokenizedBuffer.firstInvalidRow()).toBe 3
 
             advanceClock()
-            expect(changeHandler).toHaveBeenCalledWith(start: 3, end: 7, delta: 0)
+             # we discover that row 2 starts a foldable region when line 3 gets tokenized
+            expect(changeHandler).toHaveBeenCalledWith(start: 2, end: 7, delta: 0)
             expect(tokenizedBuffer.firstInvalidRow()).toBe 8
 
       describe "when there is a buffer change surrounding an invalid row", ->
@@ -233,8 +234,8 @@ describe "TokenizedBuffer", ->
           it "updates tokens to reflect the change", ->
             buffer.setTextInRange([[0, 0], [2, 0]], "foo()\n7\n")
 
-            expect(tokenizedBuffer.tokenizedLineForRow(0).tokens[1]).toEqual(value: '(', scopes: ['source.js', 'meta.function-call.js', 'meta.arguments.js', 'punctuation.definition.arguments.begin.bracket.round.js'])
-            expect(tokenizedBuffer.tokenizedLineForRow(1).tokens[0]).toEqual(value: '7', scopes: ['source.js', 'constant.numeric.decimal.js'])
+            expect(tokenizedBuffer.tokenizedLineForRow(0).tokens[1]).toEqual(value: '(', scopes: ['source.js', 'meta.function-call.js', 'punctuation.definition.arguments.begin.js'])
+            expect(tokenizedBuffer.tokenizedLineForRow(1).tokens[0]).toEqual(value: '7', scopes: ['source.js', 'constant.numeric.js'])
             # line 2 is unchanged
             expect(tokenizedBuffer.tokenizedLineForRow(2).tokens[2]).toEqual(value: 'if', scopes: ['source.js', 'keyword.control.js'])
 
@@ -252,7 +253,7 @@ describe "TokenizedBuffer", ->
               expect(changeHandler).toHaveBeenCalled()
               [event] = changeHandler.argsForCall[0]
               delete event.bufferChange
-              expect(event).toEqual(start: 2, end: 2, delta: 0)
+              expect(event).toEqual(start: 1, end: 2, delta: 0)
               changeHandler.reset()
 
               advanceClock()
@@ -262,7 +263,8 @@ describe "TokenizedBuffer", ->
               expect(changeHandler).toHaveBeenCalled()
               [event] = changeHandler.argsForCall[0]
               delete event.bufferChange
-              expect(event).toEqual(start: 3, end: 5, delta: 0)
+               # we discover that row 2 starts a foldable region when line 3 gets tokenized
+              expect(event).toEqual(start: 2, end: 5, delta: 0)
 
           it "resumes highlighting with the state of the previous line", ->
             buffer.insert([0, 0], '/*')
@@ -290,7 +292,7 @@ describe "TokenizedBuffer", ->
             expect(changeHandler).toHaveBeenCalled()
             [event] = changeHandler.argsForCall[0]
             delete event.bufferChange
-            expect(event).toEqual(start: 1, end: 3, delta: -2)
+            expect(event).toEqual(start: 0, end: 3, delta: -2) # starts at 0 because foldable on row 0 becomes false
 
         describe "when the change invalidates the tokenization of subsequent lines", ->
           it "schedules the invalidated lines to be tokenized in the background", ->
@@ -303,7 +305,7 @@ describe "TokenizedBuffer", ->
             expect(changeHandler).toHaveBeenCalled()
             [event] = changeHandler.argsForCall[0]
             delete event.bufferChange
-            expect(event).toEqual(start: 2, end: 3, delta: -1)
+            expect(event).toEqual(start: 1, end: 3, delta: -1)
             changeHandler.reset()
 
             advanceClock()
@@ -312,7 +314,8 @@ describe "TokenizedBuffer", ->
             expect(changeHandler).toHaveBeenCalled()
             [event] = changeHandler.argsForCall[0]
             delete event.bufferChange
-            expect(event).toEqual(start: 3, end: 4, delta: 0)
+            # we discover that row 2 starts a foldable region when line 3 gets tokenized
+            expect(event).toEqual(start: 2, end: 4, delta: 0)
 
         describe "when lines are both updated and inserted", ->
           it "updates tokens to reflect the change", ->
@@ -336,7 +339,7 @@ describe "TokenizedBuffer", ->
             expect(changeHandler).toHaveBeenCalled()
             [event] = changeHandler.argsForCall[0]
             delete event.bufferChange
-            expect(event).toEqual(start: 1, end: 2, delta: 2)
+            expect(event).toEqual(start: 0, end: 2, delta: 2) # starts at 0 because .foldable becomes false on row 0
 
         describe "when the change invalidates the tokenization of subsequent lines", ->
           it "schedules the invalidated lines to be tokenized in the background", ->
@@ -347,7 +350,7 @@ describe "TokenizedBuffer", ->
             expect(changeHandler).toHaveBeenCalled()
             [event] = changeHandler.argsForCall[0]
             delete event.bufferChange
-            expect(event).toEqual(start: 2, end: 2, delta: 2)
+            expect(event).toEqual(start: 1, end: 2, delta: 2)
             expect(tokenizedBuffer.tokenizedLineForRow(2).tokens[0].scopes).toEqual ['source.js', 'comment.block.js', 'punctuation.definition.comment.js']
             expect(tokenizedBuffer.tokenizedLineForRow(3).tokens[0].scopes).toEqual ['source.js', 'comment.block.js']
             expect(tokenizedBuffer.tokenizedLineForRow(4).tokens[0].scopes).toEqual ['source.js', 'comment.block.js']
@@ -891,7 +894,7 @@ describe "TokenizedBuffer", ->
         buffer.setTextInRange([[7, 0], [8, 65]], '    ok')
 
         delete changeHandler.argsForCall[0][0].bufferChange
-        expect(changeHandler).toHaveBeenCalledWith(start: 5, end: 10, delta: -1)
+        expect(changeHandler).toHaveBeenCalledWith(start: 4, end: 10, delta: -1) # starts at row 4 because it became foldable
 
         expect(tokenizedBuffer.tokenizedLineForRow(5).indentLevel).toBe 2
         expect(tokenizedBuffer.tokenizedLineForRow(6).indentLevel).toBe 2
@@ -900,7 +903,7 @@ describe "TokenizedBuffer", ->
         expect(tokenizedBuffer.tokenizedLineForRow(9).indentLevel).toBe 2
         expect(tokenizedBuffer.tokenizedLineForRow(10).indentLevel).toBe 2 # }
 
-  describe "::isFoldableAtRow(row)", ->
+  describe ".foldable on tokenized lines", ->
     changes = null
 
     beforeEach ->
@@ -912,66 +915,74 @@ describe "TokenizedBuffer", ->
         buffer, config: atom.config, grammarRegistry: atom.grammars, packageManager: atom.packages, assert: atom.assert
       })
       fullyTokenize(tokenizedBuffer)
+      tokenizedBuffer.onDidChange (change) ->
+        delete change.bufferChange
+        changes.push(change)
 
-    it "includes the first line of multi-line comments", ->
-      expect(tokenizedBuffer.isFoldableAtRow(0)).toBe true
-      expect(tokenizedBuffer.isFoldableAtRow(1)).toBe false
-      expect(tokenizedBuffer.isFoldableAtRow(2)).toBe false
-      expect(tokenizedBuffer.isFoldableAtRow(3)).toBe true # because of indent
-      expect(tokenizedBuffer.isFoldableAtRow(13)).toBe true
-      expect(tokenizedBuffer.isFoldableAtRow(14)).toBe false
-      expect(tokenizedBuffer.isFoldableAtRow(15)).toBe false
-      expect(tokenizedBuffer.isFoldableAtRow(16)).toBe false
+    it "sets .foldable to true on the first line of multi-line comments", ->
+      expect(tokenizedBuffer.tokenizedLineForRow(0).foldable).toBe true
+      expect(tokenizedBuffer.tokenizedLineForRow(1).foldable).toBe false
+      expect(tokenizedBuffer.tokenizedLineForRow(2).foldable).toBe false
+      expect(tokenizedBuffer.tokenizedLineForRow(3).foldable).toBe true # because of indent
+      expect(tokenizedBuffer.tokenizedLineForRow(13).foldable).toBe true
+      expect(tokenizedBuffer.tokenizedLineForRow(14).foldable).toBe false
+      expect(tokenizedBuffer.tokenizedLineForRow(15).foldable).toBe false
+      expect(tokenizedBuffer.tokenizedLineForRow(16).foldable).toBe false
 
       buffer.insert([0, Infinity], '\n')
+      expect(changes).toEqual [{start: 0, end: 1, delta: 1}]
 
-      expect(tokenizedBuffer.isFoldableAtRow(0)).toBe false
-      expect(tokenizedBuffer.isFoldableAtRow(1)).toBe false
-      expect(tokenizedBuffer.isFoldableAtRow(2)).toBe true
-      expect(tokenizedBuffer.isFoldableAtRow(3)).toBe false
+      expect(tokenizedBuffer.tokenizedLineForRow(0).foldable).toBe false
+      expect(tokenizedBuffer.tokenizedLineForRow(1).foldable).toBe false
+      expect(tokenizedBuffer.tokenizedLineForRow(2).foldable).toBe true
+      expect(tokenizedBuffer.tokenizedLineForRow(3).foldable).toBe false
 
+      changes = []
       buffer.undo()
+      expect(changes).toEqual [{start: 0, end: 2, delta: -1}]
+      expect(tokenizedBuffer.tokenizedLineForRow(0).foldable).toBe true
+      expect(tokenizedBuffer.tokenizedLineForRow(1).foldable).toBe false
+      expect(tokenizedBuffer.tokenizedLineForRow(2).foldable).toBe false
+      expect(tokenizedBuffer.tokenizedLineForRow(3).foldable).toBe true # because of indent
 
-      expect(tokenizedBuffer.isFoldableAtRow(0)).toBe true
-      expect(tokenizedBuffer.isFoldableAtRow(1)).toBe false
-      expect(tokenizedBuffer.isFoldableAtRow(2)).toBe false
-      expect(tokenizedBuffer.isFoldableAtRow(3)).toBe true # because of indent
-
-    it "includes non-comment lines that precede an increase in indentation", ->
+    it "sets .foldable to true on non-comment lines that precede an increase in indentation", ->
       buffer.insert([2, 0], '  ') # commented lines preceding an indent aren't foldable
+      expect(tokenizedBuffer.tokenizedLineForRow(1).foldable).toBe false
+      expect(tokenizedBuffer.tokenizedLineForRow(2).foldable).toBe false
+      expect(tokenizedBuffer.tokenizedLineForRow(3).foldable).toBe true
+      expect(tokenizedBuffer.tokenizedLineForRow(4).foldable).toBe true
+      expect(tokenizedBuffer.tokenizedLineForRow(5).foldable).toBe false
+      expect(tokenizedBuffer.tokenizedLineForRow(6).foldable).toBe false
+      expect(tokenizedBuffer.tokenizedLineForRow(7).foldable).toBe true
+      expect(tokenizedBuffer.tokenizedLineForRow(8).foldable).toBe false
 
-      expect(tokenizedBuffer.isFoldableAtRow(1)).toBe false
-      expect(tokenizedBuffer.isFoldableAtRow(2)).toBe false
-      expect(tokenizedBuffer.isFoldableAtRow(3)).toBe true
-      expect(tokenizedBuffer.isFoldableAtRow(4)).toBe true
-      expect(tokenizedBuffer.isFoldableAtRow(5)).toBe false
-      expect(tokenizedBuffer.isFoldableAtRow(6)).toBe false
-      expect(tokenizedBuffer.isFoldableAtRow(7)).toBe true
-      expect(tokenizedBuffer.isFoldableAtRow(8)).toBe false
-
+      changes = []
       buffer.insert([7, 0], '  ')
+      expect(changes).toEqual [{start: 6, end: 7, delta: 0}]
+      expect(tokenizedBuffer.tokenizedLineForRow(6).foldable).toBe true
+      expect(tokenizedBuffer.tokenizedLineForRow(7).foldable).toBe false
+      expect(tokenizedBuffer.tokenizedLineForRow(8).foldable).toBe false
 
-      expect(tokenizedBuffer.isFoldableAtRow(6)).toBe true
-      expect(tokenizedBuffer.isFoldableAtRow(7)).toBe false
-      expect(tokenizedBuffer.isFoldableAtRow(8)).toBe false
-
+      changes = []
       buffer.undo()
+      expect(changes).toEqual [{start: 6, end: 7, delta: 0}]
+      expect(tokenizedBuffer.tokenizedLineForRow(6).foldable).toBe false
+      expect(tokenizedBuffer.tokenizedLineForRow(7).foldable).toBe true
+      expect(tokenizedBuffer.tokenizedLineForRow(8).foldable).toBe false
 
-      expect(tokenizedBuffer.isFoldableAtRow(6)).toBe false
-      expect(tokenizedBuffer.isFoldableAtRow(7)).toBe true
-      expect(tokenizedBuffer.isFoldableAtRow(8)).toBe false
-
+      changes = []
       buffer.insert([7, 0], "    \n      x\n")
+      expect(changes).toEqual [{start: 6, end: 7, delta: 2}]
+      expect(tokenizedBuffer.tokenizedLineForRow(6).foldable).toBe true
+      expect(tokenizedBuffer.tokenizedLineForRow(7).foldable).toBe false
+      expect(tokenizedBuffer.tokenizedLineForRow(8).foldable).toBe false
 
-      expect(tokenizedBuffer.isFoldableAtRow(6)).toBe true
-      expect(tokenizedBuffer.isFoldableAtRow(7)).toBe false
-      expect(tokenizedBuffer.isFoldableAtRow(8)).toBe false
-
+      changes = []
       buffer.insert([9, 0], "  ")
-
-      expect(tokenizedBuffer.isFoldableAtRow(6)).toBe true
-      expect(tokenizedBuffer.isFoldableAtRow(7)).toBe false
-      expect(tokenizedBuffer.isFoldableAtRow(8)).toBe false
+      expect(changes).toEqual [{start: 9, end: 9, delta: 0}]
+      expect(tokenizedBuffer.tokenizedLineForRow(6).foldable).toBe true
+      expect(tokenizedBuffer.tokenizedLineForRow(7).foldable).toBe false
+      expect(tokenizedBuffer.tokenizedLineForRow(8).foldable).toBe false
 
   describe "when the buffer is configured with the null grammar", ->
     it "uses the placeholder tokens and does not actually tokenize using the grammar", ->

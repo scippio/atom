@@ -1,6 +1,6 @@
 /** @babel */
 
-import {it, fit, ffit, fffit, beforeEach, afterEach} from './async-spec-helpers'
+import {it, ffit, fffit, beforeEach, afterEach} from './async-spec-helpers'
 import TextEditorElement from '../src/text-editor-element'
 import _, {extend, flatten, last, toArray} from 'underscore-plus'
 
@@ -2151,11 +2151,10 @@ describe('TextEditorComponent', function () {
         item.style.height = itemHeight + 'px'
         wrapperNode.style.width = windowWidth + 'px'
         wrapperNode.style.height = windowHeight + 'px'
-        await atom.setWindowDimensions({
+        atom.setWindowDimensions({
           width: windowWidth,
           height: windowHeight
         })
-
         component.measureDimensions()
         component.measureWindowSize()
         await nextViewUpdatePromise()
@@ -4835,7 +4834,7 @@ describe('TextEditorComponent', function () {
 
     it('pastes the previously selected text at the clicked location', async function () {
       let clipboardWrittenTo = false
-      spyOn(require('electron').ipcRenderer, 'send').andCallFake(function (eventName, selectedText) {
+      spyOn(require('ipc'), 'send').andCallFake(function (eventName, selectedText) {
         if (eventName === 'write-text-to-selection-clipboard') {
           require('../src/safe-clipboard').writeText(selectedText, 'selection')
           clipboardWrittenTo = true

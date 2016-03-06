@@ -1,5 +1,5 @@
 {find, compact, extend, last} = require 'underscore-plus'
-{CompositeDisposable, Emitter} = require 'event-kit'
+{Emitter} = require 'event-kit'
 Model = require './model'
 PaneAxis = require './pane-axis'
 TextEditor = require './text-editor'
@@ -8,11 +8,6 @@ TextEditor = require './text-editor'
 # Panes can contain multiple items, one of which is *active* at a given time.
 # The view corresponding to the active item is displayed in the interface. In
 # the default configuration, tabs are also displayed for each item.
-#
-# Each pane may also contain one *pending* item. When a pending item is added
-# to a pane, it will replace the currently pending item, if any, instead of
-# simply being added. In the default configuration, the text in the tab for
-# pending items is shown in italics.
 module.exports =
 class Pane extends Model
   container: undefined
@@ -20,7 +15,7 @@ class Pane extends Model
   focused: false
 
   @deserialize: (state, {deserializers, applicationDelegate, config, notifications}) ->
-    {items, itemStackIndices, activeItemURI, activeItemUri} = state
+    {items, activeItemURI, activeItemUri} = state
     activeItemURI ?= activeItemUri
     state.items = compact(items.map (itemState) -> deserializers.deserialize(itemState))
     state.activeItem = find state.items, (item) ->
@@ -42,25 +37,20 @@ class Pane extends Model
     } = params
 
     @emitter = new Emitter
-    @subscriptionsPerItem = new WeakMap
+    @itemSubscriptions = new WeakMap
     @items = []
-    @itemStack = []
 
     @addItems(compact(params?.items ? []))
     @setActiveItem(@items[0]) unless @getActiveItem()?
-    @addItemsToStack(params?.itemStackIndices ? [])
     @setFlexScale(params?.flexScale ? 1)
 
   serialize: ->
     if typeof @activeItem?.getURI is 'function'
       activeItemURI = @activeItem.getURI()
-    itemsToBeSerialized = compact(@items.map((item) -> item if typeof item.serialize is 'function'))
-    itemStackIndices = (itemsToBeSerialized.indexOf(item) for item in @itemStack when typeof item.serialize is 'function')
 
     deserializer: 'Pane'
     id: @id
-    items: itemsToBeSerialized.map((item) -> item.serialize())
-    itemStackIndices: itemStackIndices
+    items: compact(@items.map((item) -> item.serialize?()))
     activeItemURI: activeItemURI
     focused: @focused
     flexScale: @flexScale
@@ -270,8 +260,8 @@ class Pane extends Model
   getPanes: -> [this]
 
   unsubscribeFromItem: (item) ->
-    @subscriptionsPerItem.get(item)?.dispose()
-    @subscriptionsPerItem.delete(item)
+    @itemSubscriptions.get(item)?.dispose()
+    @itemSubscriptions.delete(item)
 
   ###
   Section: Items
@@ -288,29 +278,11 @@ class Pane extends Model
   # Returns a pane item.
   getActiveItem: -> @activeItem
 
-  setActiveItem: (activeItem, options) ->
-    {modifyStack} = options if options?
+  setActiveItem: (activeItem) ->
     unless activeItem is @activeItem
-      @addItemToStack(activeItem) unless modifyStack is false
       @activeItem = activeItem
       @emitter.emit 'did-change-active-item', @activeItem
     @activeItem
-
-  # Build the itemStack after deserializing
-  addItemsToStack: (itemStackIndices) ->
-    if @items.length > 0
-      if itemStackIndices.length is 0 or itemStackIndices.length isnt @items.length or itemStackIndices.indexOf(-1) >= 0
-        itemStackIndices = (i for i in [0..@items.length-1])
-      for itemIndex in itemStackIndices
-        @addItemToStack(@items[itemIndex])
-      return
-
-  # Add item (or move item) to the end of the itemStack
-  addItemToStack: (newItem) ->
-    return unless newItem?
-    index = @itemStack.indexOf(newItem)
-    @itemStack.splice(index, 1) unless index is -1
-    @itemStack.push(newItem)
 
   # Return an {TextEditor} if the pane item is an {TextEditor}, or null otherwise.
   getActiveEditor: ->
@@ -323,29 +295,6 @@ class Pane extends Model
   # Returns an item or `null` if no item exists at the given index.
   itemAtIndex: (index) ->
     @items[index]
-
-  # Makes the next item in the itemStack active.
-  activateNextRecentlyUsedItem: ->
-    if @items.length > 1
-      @itemStackIndex = @itemStack.length - 1 unless @itemStackIndex?
-      @itemStackIndex = @itemStack.length if @itemStackIndex is 0
-      @itemStackIndex = @itemStackIndex - 1
-      nextRecentlyUsedItem = @itemStack[@itemStackIndex]
-      @setActiveItem(nextRecentlyUsedItem, modifyStack: false)
-
-  # Makes the previous item in the itemStack active.
-  activatePreviousRecentlyUsedItem: ->
-    if @items.length > 1
-      if @itemStackIndex + 1 is @itemStack.length or not @itemStackIndex?
-        @itemStackIndex = -1
-      @itemStackIndex = @itemStackIndex + 1
-      previousRecentlyUsedItem = @itemStack[@itemStackIndex]
-      @setActiveItem(previousRecentlyUsedItem, modifyStack: false)
-
-  # Moves the active item to the end of the itemStack once the ctrl key is lifted
-  moveActiveItemToTopOfStack: ->
-    delete @itemStackIndex
-    @addItemToStack(@activeItem)
 
   # Public: Makes the next item active.
   activateNextItem: ->
@@ -393,17 +342,13 @@ class Pane extends Model
 
   # Public: Make the given item *active*, causing it to be displayed by
   # the pane's view.
-  #
-  # * `pending` (optional) {Boolean} indicating that the item should be added
-  #   in a pending state if it does not yet exist in the pane. Existing pending
-  #   items in a pane are replaced with new pending items when they are opened.
-  activateItem: (item, pending=false) ->
+  activateItem: (item) ->
     if item?
-      if @getPendingItem() is @activeItem
+      if @activeItem?.isPending?()
         index = @getActiveItemIndex()
       else
         index = @getActiveItemIndex() + 1
-      @addItem(item, index, false, pending)
+      @addItem(item, index, false)
       @setActiveItem(item)
 
   # Public: Add the given item to the pane.
@@ -412,49 +357,27 @@ class Pane extends Model
   #   view.
   # * `index` (optional) {Number} indicating the index at which to add the item.
   #   If omitted, the item is added after the current active item.
-  # * `pending` (optional) {Boolean} indicating that the item should be
-  #   added in a pending state. Existing pending items in a pane are replaced with
-  #   new pending items when they are opened.
   #
   # Returns the added item.
-  addItem: (item, index=@getActiveItemIndex() + 1, moved=false, pending=false) ->
+  addItem: (item, index=@getActiveItemIndex() + 1, moved=false) ->
     throw new Error("Pane items must be objects. Attempted to add item #{item}.") unless item? and typeof item is 'object'
     throw new Error("Adding a pane item with URI '#{item.getURI?()}' that has already been destroyed") if item.isDestroyed?()
 
     return if item in @items
 
+    if item.isPending?()
+      for existingItem, i in @items
+        if existingItem.isPending?()
+          @destroyItem(existingItem)
+          break
+
     if typeof item.onDidDestroy is 'function'
-      itemSubscriptions = new CompositeDisposable
-      itemSubscriptions.add item.onDidDestroy => @removeItem(item, false)
-      if typeof item.onDidTerminatePendingState is "function"
-        itemSubscriptions.add item.onDidTerminatePendingState =>
-          @clearPendingItem() if @getPendingItem() is item
-      itemSubscriptions.add item.onDidDestroy => @removeItem(item, false)
-      @subscriptionsPerItem.set item, itemSubscriptions
+      @itemSubscriptions.set item, item.onDidDestroy => @removeItem(item, false)
 
     @items.splice(index, 0, item)
-    lastPendingItem = @getPendingItem()
-    @setPendingItem(item) if pending
-
     @emitter.emit 'did-add-item', {item, index, moved}
-    @destroyItem(lastPendingItem) if lastPendingItem?
     @setActiveItem(item) unless @getActiveItem()?
     item
-
-  setPendingItem: (item) =>
-    if @pendingItem isnt item
-      mostRecentPendingItem = @pendingItem
-      @pendingItem = item
-      @emitter.emit 'item-did-terminate-pending-state', mostRecentPendingItem
-
-  getPendingItem: =>
-    @pendingItem or null
-
-  clearPendingItem: =>
-    @setPendingItem(null)
-
-  onItemDidTerminatePendingState: (callback) =>
-    @emitter.on 'item-did-terminate-pending-state', callback
 
   # Public: Add the given items to the pane.
   #
@@ -473,8 +396,7 @@ class Pane extends Model
   removeItem: (item, moved) ->
     index = @items.indexOf(item)
     return if index is -1
-    @pendingItem = null if @getPendingItem() is item
-    @removeItemFromStack(item)
+
     @emitter.emit 'will-remove-item', {item, index, destroyed: not moved, moved}
     @unsubscribeFromItem(item)
 
@@ -489,14 +411,6 @@ class Pane extends Model
     @emitter.emit 'did-remove-item', {item, index, destroyed: not moved, moved}
     @container?.didDestroyPaneItem({item, index, pane: this}) unless moved
     @destroy() if @items.length is 0 and @config.get('core.destroyEmptyPanes')
-
-  # Remove the given item from the itemStack.
-  #
-  # * `item` The item to remove.
-  # * `index` {Number} indicating the index to which to remove the item from the itemStack.
-  removeItemFromStack: (item) ->
-    index = @itemStack.indexOf(item)
-    @itemStack.splice(index, 1) unless index is -1
 
   # Public: Move the given item to the given index.
   #
@@ -747,12 +661,10 @@ class Pane extends Model
       @parent.replaceChild(this, new PaneAxis({@container, orientation, children: [this], @flexScale}))
       @setFlexScale(1)
 
-    newPane = new Pane(extend({@applicationDelegate, @notificationManager, @deserializerManager, @config}, params))
+    newPane = new Pane(extend({@applicationDelegate, @deserializerManager, @config}, params))
     switch side
       when 'before' then @parent.insertChildBefore(this, newPane)
       when 'after' then @parent.insertChildAfter(this, newPane)
-
-    @moveItemToPane(@activeItem, newPane) if params?.moveActiveItem
 
     newPane.activate()
     newPane
@@ -799,7 +711,7 @@ class Pane extends Model
     if @parent.orientation is 'vertical'
       bottommostSibling = last(@parent.children)
       if bottommostSibling instanceof PaneAxis
-        @splitDown()
+        @splitRight()
       else
         bottommostSibling
     else

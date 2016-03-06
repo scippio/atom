@@ -1,4 +1,4 @@
-{Menu} = require 'electron'
+Menu = require 'menu'
 
 module.exports =
 class ContextMenu

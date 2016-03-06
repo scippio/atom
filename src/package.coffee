@@ -84,7 +84,7 @@ class Package
         @loadKeymaps()
         @loadMenus()
         @loadStylesheets()
-        @registerDeserializerMethods()
+        @loadDeserializers()
         @configSchemaRegisteredOnLoad = @registerConfigSchemaFromMetadata()
         @settingsPromise = @loadSettings()
         if @shouldRequireMainModuleOnLoad() and not @mainModule?
@@ -158,9 +158,7 @@ class Package
     false
 
   # TODO: Remove. Settings view calls this method currently.
-  activateConfig: ->
-    @requireMainModule()
-    @registerConfigSchemaFromMainModule()
+  activateConfig: -> @registerConfigSchemaFromMainModule()
 
   activateStylesheets: ->
     return if @stylesheetsActivated
@@ -277,24 +275,24 @@ class Package
     @stylesheets = @getStylesheetPaths().map (stylesheetPath) =>
       [stylesheetPath, @themeManager.loadStylesheet(stylesheetPath, true)]
 
-  registerDeserializerMethods: ->
+  loadDeserializers: ->
     if @metadata.deserializers?
-      Object.keys(@metadata.deserializers).forEach (deserializerName) =>
-        methodName = @metadata.deserializers[deserializerName]
-        atom.deserializers.add
-          name: deserializerName,
-          deserialize: (state, atomEnvironment) =>
-            @registerViewProviders()
-            @requireMainModule()
-            @mainModule[methodName](state, atomEnvironment)
+      for name, implementationPath of @metadata.deserializers
+        do =>
+          deserializePath = path.join(@path, implementationPath)
+          deserializeFunction = null
+          atom.deserializers.add
+            name: name,
+            deserialize: =>
+              @registerViewProviders()
+              deserializeFunction ?= require(deserializePath)
+              deserializeFunction.apply(this, arguments)
       return
 
   registerViewProviders: ->
     if @metadata.viewProviders? and not @registeredViewProviders
-      @requireMainModule()
-      @metadata.viewProviders.forEach (methodName) =>
-        @viewRegistry.addViewProvider (model) =>
-          @mainModule[methodName](model)
+      for implementationPath in @metadata.viewProviders
+        @viewRegistry.addViewProvider(require(path.join(@path, implementationPath)))
       @registeredViewProviders = true
 
   getStylesheetsPath: ->
