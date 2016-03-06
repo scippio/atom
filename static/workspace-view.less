@@ -16,8 +16,7 @@ body {
 }
 
 atom-workspace {
-  display: flex;
-  flex-direction: column;
+  display: block;
   height: 100%;
   overflow: hidden;
   position: relative;
@@ -26,13 +25,13 @@ atom-workspace {
   font-family: @font-family;
 
   atom-workspace-axis.horizontal {
-    display: flex;
-    flex: 1;
+    display: -webkit-flex;
+    height: 100%;
   }
 
   atom-workspace-axis.vertical {
-    display: flex;
-    flex: 1;
-    flex-direction: column;
+    display: -webkit-flex;
+    -webkit-flex: 1;
+    -webkit-flex-flow: column;
   }
 }

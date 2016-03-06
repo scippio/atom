@@ -64,9 +64,7 @@ Tooltip.prototype.init = function (element, options) {
 
     if (trigger === 'click') {
       this.disposables.add(listen(this.element, 'click', this.options.selector, this.toggle.bind(this)))
-    } else if (trigger === 'manual') {
-      this.show()
-    } else {
+    } else if (trigger !== 'manual') {
       var eventIn, eventOut
 
       if (trigger === 'hover') {

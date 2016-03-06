@@ -31,9 +31,14 @@ module.exports = (gruntObject) ->
     cp path.join(docsOutputDir, 'api.json'), path.join(buildDir, 'atom-api.json')
 
   grunt.registerTask 'upload-assets', 'Upload the assets to a GitHub release', ->
-    releaseBranch = grunt.config.get('atom.releaseBranch')
-    isPrerelease = grunt.config.get('atom.channel') is 'beta'
-    return unless releaseBranch?
+    channel = grunt.config.get('atom.channel')
+    switch channel
+      when 'stable'
+        isPrerelease = false
+      when 'beta'
+        isPrerelease = true
+      else
+        return
 
     doneCallback = @async()
     startTime = Date.now()
@@ -50,7 +55,7 @@ module.exports = (gruntObject) ->
 
     zipAssets buildDir, assets, (error) ->
       return done(error) if error?
-      getAtomDraftRelease isPrerelease, releaseBranch, (error, release) ->
+      getAtomDraftRelease isPrerelease, channel, (error, release) ->
         return done(error) if error?
         assetNames = (asset.assetName for asset in assets)
         deleteExistingAssets release, assetNames, (error) ->

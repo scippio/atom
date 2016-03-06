@@ -484,7 +484,7 @@ class GitRepository
 
       relativeProjectPaths = @project?.getPaths()
         .map (path) => @relativize(path)
-        .map (path) -> if path.length > 0 then path + '/**' else '*'
+        .filter (path) -> path.length > 0
 
       @statusTask?.terminate()
       @statusTask = Task.once @handlerPath, @getPath(), relativeProjectPaths, ({statuses, upstream, branch, submodules}) =>

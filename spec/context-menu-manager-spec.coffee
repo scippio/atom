@@ -156,28 +156,3 @@ describe "ContextMenuManager", ->
       catch error
         addError = error
       expect(addError.message).toContain('<>')
-
-    it "calls `created` hooks for submenu items", ->
-      item = {
-        label: 'A',
-        command: 'B',
-        submenu: [
-          {
-            label: 'C',
-            created: (event) -> @label = 'D',
-          }
-        ]
-      }
-      contextMenu.add('.grandchild': [item])
-
-      dispatchedEvent = {target: grandchild}
-      expect(contextMenu.templateForEvent(dispatchedEvent)).toEqual(
-        [
-          label: 'A',
-          command: 'B',
-          submenu: [
-            {
-              label: 'D',
-            }
-          ]
-        ])

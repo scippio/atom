@@ -12,16 +12,12 @@ class FileSystemBlobStore {
   }
 
   constructor (directory) {
+    this.inMemoryBlobs = new Map()
+    this.invalidationKeys = {}
     this.blobFilename = path.join(directory, 'BLOB')
     this.blobMapFilename = path.join(directory, 'MAP')
     this.invalidationKeysFilename = path.join(directory, 'INVKEYS')
     this.lockFilename = path.join(directory, 'LOCK')
-    this.reset()
-  }
-
-  reset () {
-    this.inMemoryBlobs = new Map()
-    this.invalidationKeys = {}
     this.storedBlob = new Buffer(0)
     this.storedBlobMap = {}
   }
@@ -36,14 +32,9 @@ class FileSystemBlobStore {
     if (!fs.existsSync(this.invalidationKeysFilename)) {
       return
     }
-
-    try {
-      this.storedBlob = fs.readFileSync(this.blobFilename)
-      this.storedBlobMap = JSON.parse(fs.readFileSync(this.blobMapFilename))
-      this.invalidationKeys = JSON.parse(fs.readFileSync(this.invalidationKeysFilename))
-    } catch (e) {
-      this.reset()
-    }
+    this.storedBlob = fs.readFileSync(this.blobFilename)
+    this.storedBlobMap = JSON.parse(fs.readFileSync(this.blobMapFilename))
+    this.invalidationKeys = JSON.parse(fs.readFileSync(this.invalidationKeysFilename))
   }
 
   save () {

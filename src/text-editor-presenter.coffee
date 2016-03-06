@@ -13,7 +13,7 @@ class TextEditorPresenter
   minimumReflowInterval: 200
 
   constructor: (params) ->
-    {@model, @config, @lineTopIndex, scrollPastEnd} = params
+    {@model, @config, @lineTopIndex} = params
     {@cursorBlinkPeriod, @cursorBlinkResumeDelay, @stoppedScrollingDelay, @tileSize} = params
     {@contentFrameWidth} = params
 
@@ -41,8 +41,6 @@ class TextEditorPresenter
     @startBlinkingCursors() if @focused
     @startReflowing() if @continuousReflow
     @updating = false
-
-    @scrollPastEndOverride = scrollPastEnd ? true
 
   setLinesYardstick: (@linesYardstick) ->
 
@@ -434,14 +432,18 @@ class TextEditorPresenter
     return
 
   updateCursorsState: ->
-    return unless @startRow? and @endRow? and @hasPixelRectRequirements() and @baseCharacterWidth?
-
     @state.content.cursors = {}
-    for cursor in @model.cursorsForScreenRowRange(@startRow, @endRow - 1) when cursor.isVisible()
-      pixelRect = @pixelRectForScreenRange(cursor.getScreenRange())
-      pixelRect.width = Math.round(@baseCharacterWidth) if pixelRect.width is 0
-      @state.content.cursors[cursor.id] = pixelRect
+    @updateCursorState(cursor) for cursor in @model.cursors # using property directly to avoid allocation
     return
+
+  updateCursorState: (cursor) ->
+    return unless @startRow? and @endRow? and @hasPixelRectRequirements() and @baseCharacterWidth?
+    screenRange = cursor.getScreenRange()
+    return unless cursor.isVisible() and @startRow <= screenRange.start.row < @endRow
+
+    pixelRect = @pixelRectForScreenRange(screenRange)
+    pixelRect.width = Math.round(@baseCharacterWidth) if pixelRect.width is 0
+    @state.content.cursors[cursor.id] = pixelRect
 
   updateOverlaysState: ->
     return unless @hasOverlayPositionRequirements()
@@ -601,14 +603,7 @@ class TextEditorPresenter
 
     if endRow > startRow
       bufferRows = @model.bufferRowsForScreenRows(startRow, endRow - 1)
-      previousBufferRow = -1
-      foldable = false
       for bufferRow, i in bufferRows
-         # don't compute foldability more than once per buffer row
-        if previousBufferRow isnt bufferRow
-          foldable = @model.isFoldableAtBufferRow(bufferRow)
-          previousBufferRow = bufferRow
-
         if bufferRow is lastBufferRow
           softWrapped = true
         else
@@ -618,6 +613,7 @@ class TextEditorPresenter
         screenRow = startRow + i
         line = @model.tokenizedLineForScreenRow(screenRow)
         decorationClasses = @lineNumberDecorationClassesForRow(screenRow)
+        foldable = @model.isFoldableAtScreenRow(screenRow)
         blockDecorationsBeforeCurrentScreenRowHeight = @lineTopIndex.pixelPositionAfterBlocksForRow(screenRow) - @lineTopIndex.pixelPositionBeforeBlocksForRow(screenRow)
         blockDecorationsHeight = blockDecorationsBeforeCurrentScreenRowHeight
         if screenRow % @tileSize isnt 0
@@ -663,7 +659,7 @@ class TextEditorPresenter
     return unless @contentHeight? and @clientHeight?
 
     contentHeight = @contentHeight
-    if @scrollPastEnd and @scrollPastEndOverride
+    if @scrollPastEnd
       extraScrollHeight = @clientHeight - (@lineHeight * 3)
       contentHeight += extraScrollHeight if extraScrollHeight > 0
     scrollHeight = Math.max(contentHeight, @height)

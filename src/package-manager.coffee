@@ -357,9 +357,7 @@ class PackageManager
     packagePaths = @getAvailablePackagePaths()
     packagePaths = packagePaths.filter (packagePath) => not @isPackageDisabled(path.basename(packagePath))
     packagePaths = _.uniq packagePaths, (packagePath) -> path.basename(packagePath)
-    @config.transact =>
-      @loadPackage(packagePath) for packagePath in packagePaths
-      return
+    @loadPackage(packagePath) for packagePath in packagePaths
     @emitter.emit 'did-load-initial-packages'
 
   loadPackage: (nameOrPath) ->
@@ -469,14 +467,6 @@ class PackageManager
     return unless hook? and _.isString(hook) and hook.length > 0
     @activationHookEmitter.on(hook, callback)
 
-  serialize: ->
-    for pack in @getActivePackages()
-      @serializePackage(pack)
-    @packageStates
-
-  serializePackage: (pack) ->
-    @setPackageState(pack.name, state) if state = pack.serialize?()
-
   # Deactivate all packages
   deactivatePackages: ->
     @config.transact =>
@@ -488,7 +478,8 @@ class PackageManager
   # Deactivate the package with the given name
   deactivatePackage: (name) ->
     pack = @getLoadedPackage(name)
-    @serializePackage(pack) if @isPackageActive(pack.name)
+    if @isPackageActive(name)
+      @setPackageState(pack.name, state) if state = pack.serialize?()
     pack.deactivate()
     delete @activePackages[pack.name]
     delete @activatingPackages[pack.name]
@@ -541,12 +532,11 @@ class PackageManager
     unless typeof metadata.name is 'string' and metadata.name.length > 0
       metadata.name = packageName
 
-    if metadata.repository?.type is 'git' and typeof metadata.repository.url is 'string'
-      metadata.repository.url = metadata.repository.url.replace(/(^git\+)|(\.git$)/g, '')
-
     metadata
 
   normalizePackageMetadata: (metadata) ->
     unless metadata?._id
       normalizePackageData ?= require 'normalize-package-data'
       normalizePackageData(metadata)
+      if metadata.repository?.type is 'git' and typeof metadata.repository.url is 'string'
+        metadata.repository.url = metadata.repository.url.replace(/^git\+/, '')

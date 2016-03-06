@@ -18,8 +18,8 @@ describe "Pane", ->
     onDidDestroy: (fn) -> @emitter.on('did-destroy', fn)
     destroy: -> @destroyed = true; @emitter.emit('did-destroy')
     isDestroyed: -> @destroyed
-    onDidTerminatePendingState: (callback) -> @emitter.on 'terminate-pending-state', callback
-    terminatePendingState: -> @emitter.emit 'terminate-pending-state'
+    isPending: -> @pending
+    pending: false
 
   beforeEach ->
     confirm = spyOn(atom.applicationDelegate, 'confirm')
@@ -132,37 +132,15 @@ describe "Pane", ->
       expect(-> pane.addItem('foo')).toThrow()
       expect(-> pane.addItem(1)).toThrow()
 
-    it "destroys any existing pending item", ->
+    it "destroys any existing pending item if the new item is pending", ->
       pane = new Pane(paneParams(items: []))
       itemA = new Item("A")
       itemB = new Item("B")
-      itemC = new Item("C")
-      pane.addItem(itemA, undefined, false, false)
-      pane.addItem(itemB, undefined, false, true)
-      pane.addItem(itemC, undefined, false, false)
-      expect(itemB.isDestroyed()).toBe true
-
-    it "adds the new item before destroying any existing pending item", ->
-      eventOrder = []
-
-      pane = new Pane(paneParams(items: []))
-      itemA = new Item("A")
-      itemB = new Item("B")
-      pane.addItem(itemA, undefined, false, true)
-
-      pane.onDidAddItem ({item}) ->
-        eventOrder.push("add") if item is itemB
-
-      pane.onDidRemoveItem ({item}) ->
-        eventOrder.push("remove") if item is itemA
-
+      itemA.pending = true
+      itemB.pending = true
+      pane.addItem(itemA)
       pane.addItem(itemB)
-
-      waitsFor ->
-        eventOrder.length is 2
-
-      runs ->
-        expect(eventOrder).toEqual ["add", "remove"]
+      expect(itemA.isDestroyed()).toBe true
 
   describe "::activateItem(item)", ->
     pane = null
@@ -194,82 +172,20 @@ describe "Pane", ->
       beforeEach ->
         itemC = new Item("C")
         itemD = new Item("D")
+        itemC.pending = true
+        itemD.pending = true
 
       it "replaces the active item if it is pending", ->
-        pane.activateItem(itemC, true)
+        pane.activateItem(itemC)
         expect(pane.getItems().map (item) -> item.name).toEqual ['A', 'C', 'B']
-        pane.activateItem(itemD, true)
+        pane.activateItem(itemD)
         expect(pane.getItems().map (item) -> item.name).toEqual ['A', 'D', 'B']
 
       it "adds the item after the active item if it is not pending", ->
-        pane.activateItem(itemC, true)
+        pane.activateItem(itemC)
         pane.activateItemAtIndex(2)
-        pane.activateItem(itemD, true)
+        pane.activateItem(itemD)
         expect(pane.getItems().map (item) -> item.name).toEqual ['A', 'B', 'D']
-
-  describe "::setPendingItem", ->
-    pane = null
-
-    beforeEach ->
-      pane = atom.workspace.getActivePane()
-
-    it "changes the pending item", ->
-      expect(pane.getPendingItem()).toBeNull()
-      pane.setPendingItem("fake item")
-      expect(pane.getPendingItem()).toEqual "fake item"
-
-  describe "::onItemDidTerminatePendingState callback", ->
-    pane = null
-    callbackCalled = false
-
-    beforeEach ->
-      pane = atom.workspace.getActivePane()
-      callbackCalled = false
-
-    it "is called when the pending item changes", ->
-      pane.setPendingItem("fake item one")
-      pane.onItemDidTerminatePendingState (item) ->
-        callbackCalled = true
-        expect(item).toEqual "fake item one"
-      pane.setPendingItem("fake item two")
-      expect(callbackCalled).toBeTruthy()
-
-    it "has access to the new pending item via ::getPendingItem", ->
-      pane.setPendingItem("fake item one")
-      pane.onItemDidTerminatePendingState (item) ->
-        callbackCalled = true
-        expect(pane.getPendingItem()).toEqual "fake item two"
-      pane.setPendingItem("fake item two")
-      expect(callbackCalled).toBeTruthy()
-
-  describe "::activateNextRecentlyUsedItem() and ::activatePreviousRecentlyUsedItem()", ->
-    it "sets the active item to the next/previous item in the itemStack, looping around at either end", ->
-      pane = new Pane(paneParams(items: [new Item("A"), new Item("B"), new Item("C"), new Item("D"), new Item("E")]))
-      [item1, item2, item3, item4, item5] = pane.getItems()
-      pane.itemStack = [item3, item1, item2, item5, item4]
-
-      pane.activateItem(item4)
-      expect(pane.getActiveItem()).toBe item4
-      pane.activateNextRecentlyUsedItem()
-      expect(pane.getActiveItem()).toBe item5
-      pane.activateNextRecentlyUsedItem()
-      expect(pane.getActiveItem()).toBe item2
-      pane.activatePreviousRecentlyUsedItem()
-      expect(pane.getActiveItem()).toBe item5
-      pane.activatePreviousRecentlyUsedItem()
-      expect(pane.getActiveItem()).toBe item4
-      pane.activatePreviousRecentlyUsedItem()
-      expect(pane.getActiveItem()).toBe item3
-      pane.activatePreviousRecentlyUsedItem()
-      expect(pane.getActiveItem()).toBe item1
-      pane.activateNextRecentlyUsedItem()
-      expect(pane.getActiveItem()).toBe item3
-      pane.activateNextRecentlyUsedItem()
-      expect(pane.getActiveItem()).toBe item4
-      pane.activateNextRecentlyUsedItem()
-      pane.moveActiveItemToTopOfStack()
-      expect(pane.getActiveItem()).toBe item5
-      expect(pane.itemStack[4]).toBe item5
 
   describe "::activateNextItem() and ::activatePreviousItem()", ->
     it "sets the active item to the next/previous item, looping around at either end", ->
@@ -337,7 +253,7 @@ describe "Pane", ->
       pane = new Pane(paneParams(items: [new Item("A"), new Item("B"), new Item("C")]))
       [item1, item2, item3] = pane.getItems()
 
-    it "removes the item from the items list and destroys it", ->
+    it "removes the item from the items list and destroyes it", ->
       expect(pane.getActiveItem()).toBe item1
       pane.destroyItem(item2)
       expect(item2 in pane.getItems()).toBe false
@@ -347,23 +263,6 @@ describe "Pane", ->
       pane.destroyItem(item1)
       expect(item1 in pane.getItems()).toBe false
       expect(item1.isDestroyed()).toBe true
-
-    it "removes the item from the itemStack", ->
-      pane.itemStack = [item2, item3, item1]
-
-      pane.activateItem(item1)
-      expect(pane.getActiveItem()).toBe item1
-      pane.destroyItem(item3)
-      expect(pane.itemStack).toEqual [item2, item1]
-      expect(pane.getActiveItem()).toBe item1
-
-      pane.destroyItem(item1)
-      expect(pane.itemStack).toEqual [item2]
-      expect(pane.getActiveItem()).toBe item2
-
-      pane.destroyItem(item2)
-      expect(pane.itemStack).toEqual []
-      expect(pane.getActiveItem()).toBeUndefined()
 
     it "invokes ::onWillDestroyItem() observers before destroying the item", ->
       events = []
@@ -707,13 +606,12 @@ describe "Pane", ->
           expect(item4.isDestroyed()).toBe false
 
   describe "split methods", ->
-    [pane1, item1, container] = []
+    [pane1, container] = []
 
     beforeEach ->
       container = new PaneContainer(config: atom.config, confirm: confirm, deserializerManager: atom.deserializers)
       pane1 = container.getActivePane()
-      item1 = new Item("A")
-      pane1.addItem(item1)
+      pane1.addItem(new Item("A"))
 
     describe "::splitLeft(params)", ->
       describe "when the parent is the container root", ->
@@ -722,11 +620,6 @@ describe "Pane", ->
           pane3 = pane1.splitLeft(items: [new Item("C")])
           expect(container.root.orientation).toBe 'horizontal'
           expect(container.root.children).toEqual [pane2, pane3, pane1]
-
-      describe "when `moveActiveItem: true` is passed in the params", ->
-        it "moves the active item", ->
-          pane2 = pane1.splitLeft(moveActiveItem: true)
-          expect(pane2.getActiveItem()).toBe item1
 
       describe "when `copyActiveItem: true` is passed in the params", ->
         it "duplicates the active item", ->
@@ -750,11 +643,6 @@ describe "Pane", ->
           expect(container.root.orientation).toBe 'horizontal'
           expect(container.root.children).toEqual [pane1, pane3, pane2]
 
-      describe "when `moveActiveItem: true` is passed in the params", ->
-        it "moves the active item", ->
-          pane2 = pane1.splitLeft(moveActiveItem: true)
-          expect(pane2.getActiveItem()).toBe item1
-
       describe "when `copyActiveItem: true` is passed in the params", ->
         it "duplicates the active item", ->
           pane2 = pane1.splitRight(copyActiveItem: true)
@@ -777,11 +665,6 @@ describe "Pane", ->
           expect(container.root.orientation).toBe 'vertical'
           expect(container.root.children).toEqual [pane2, pane3, pane1]
 
-      describe "when `moveActiveItem: true` is passed in the params", ->
-        it "moves the active item", ->
-          pane2 = pane1.splitLeft(moveActiveItem: true)
-          expect(pane2.getActiveItem()).toBe item1
-
       describe "when `copyActiveItem: true` is passed in the params", ->
         it "duplicates the active item", ->
           pane2 = pane1.splitUp(copyActiveItem: true)
@@ -803,11 +686,6 @@ describe "Pane", ->
           pane3 = pane1.splitDown(items: [new Item("C")])
           expect(container.root.orientation).toBe 'vertical'
           expect(container.root.children).toEqual [pane1, pane3, pane2]
-
-      describe "when `moveActiveItem: true` is passed in the params", ->
-        it "moves the active item", ->
-          pane2 = pane1.splitLeft(moveActiveItem: true)
-          expect(pane2.getActiveItem()).toBe item1
 
       describe "when `copyActiveItem: true` is passed in the params", ->
         it "duplicates the active item", ->
@@ -907,67 +785,6 @@ describe "Pane", ->
         pane2.destroy()
         expect(container.root).toBe pane1
 
-  describe "pending state", ->
-    editor1 = null
-    pane = null
-    eventCount = null
-
-    beforeEach ->
-      waitsForPromise ->
-        atom.workspace.open('sample.txt', pending: true).then (o) ->
-          editor1 = o
-          pane = atom.workspace.getActivePane()
-
-      runs ->
-        eventCount = 0
-        editor1.onDidTerminatePendingState -> eventCount++
-
-    it "does not open file in pending state by default", ->
-      waitsForPromise ->
-        atom.workspace.open('sample.js').then (o) ->
-          editor1 = o
-          pane = atom.workspace.getActivePane()
-
-      runs ->
-        expect(pane.getPendingItem()).toBeNull()
-
-    it "opens file in pending state if 'pending' option is true", ->
-      expect(pane.getPendingItem()).toEqual editor1
-
-    it "terminates pending state if ::terminatePendingState is invoked", ->
-      editor1.terminatePendingState()
-
-      expect(pane.getPendingItem()).toBeNull()
-      expect(eventCount).toBe 1
-
-    it "terminates pending state when buffer is changed", ->
-      editor1.insertText('I\'ll be back!')
-      advanceClock(editor1.getBuffer().stoppedChangingDelay)
-
-      expect(pane.getPendingItem()).toBeNull()
-      expect(eventCount).toBe 1
-
-    it "only calls terminate handler once when text is modified twice", ->
-      editor1.insertText('Some text')
-      advanceClock(editor1.getBuffer().stoppedChangingDelay)
-
-      editor1.save()
-
-      editor1.insertText('More text')
-      advanceClock(editor1.getBuffer().stoppedChangingDelay)
-
-      expect(pane.getPendingItem()).toBeNull()
-      expect(eventCount).toBe 1
-
-    it "only calls clearPendingItem if there is a pending item to clear", ->
-      spyOn(pane, "clearPendingItem").andCallThrough()
-
-      editor1.terminatePendingState()
-      editor1.terminatePendingState()
-
-      expect(pane.getPendingItem()).toBeNull()
-      expect(pane.clearPendingItem.callCount).toBe 1
-
   describe "serialization", ->
     pane = null
 
@@ -999,30 +816,3 @@ describe "Pane", ->
       pane.focus()
       newPane = Pane.deserialize(pane.serialize(), atom)
       expect(newPane.focused).toBe true
-
-    it "can serialize and deserialize the order of the items in the itemStack", ->
-      [item1, item2, item3] = pane.getItems()
-      pane.itemStack = [item3, item1, item2]
-      newPane = Pane.deserialize(pane.serialize(), atom)
-      expect(newPane.itemStack).toEqual pane.itemStack
-      expect(newPane.itemStack[2]).toEqual item2
-
-    it "builds the itemStack if the itemStack is not serialized", ->
-      [item1, item2, item3] = pane.getItems()
-      newPane = Pane.deserialize(pane.serialize(), atom)
-      expect(newPane.getItems()).toEqual newPane.itemStack
-
-    it "rebuilds the itemStack if items.length does not match itemStack.length", ->
-      [item1, item2, item3] = pane.getItems()
-      pane.itemStack = [item2, item3]
-      newPane = Pane.deserialize(pane.serialize(), atom)
-      expect(newPane.getItems()).toEqual newPane.itemStack
-
-    it "does not serialize the reference to the items in the itemStack for pane items that will not be serialized", ->
-      [item1, item2, item3] = pane.getItems()
-      pane.itemStack = [item2, item1, item3]
-      unserializable = {}
-      pane.activateItem(unserializable)
-
-      newPane = Pane.deserialize(pane.serialize(), atom)
-      expect(newPane.itemStack).toEqual [item2, item1, item3]

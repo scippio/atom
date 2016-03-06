@@ -15,8 +15,6 @@ ChromedriverPort = 9515
 ChromedriverURLBase = "/wd/hub"
 ChromedriverStatusURL = "http://localhost:#{ChromedriverPort}#{ChromedriverURLBase}/status"
 
-userDataDir = temp.mkdirSync('atom-user-data-dir')
-
 chromeDriverUp = (done) ->
   checkStatus = ->
     http
@@ -50,7 +48,7 @@ buildAtomClient = (args, env) ->
           "atom-env=#{map(env, (value, key) -> "#{key}=#{value}").join(" ")}"
           "dev"
           "safe"
-          "user-data-dir=#{userDataDir}"
+          "user-data-dir=#{temp.mkdirSync('atom-user-data-dir')}"
           "socket-path=#{SocketPath}"
         ])
 
@@ -126,7 +124,7 @@ buildAtomClient = (args, env) ->
 
     .addCommand "simulateQuit", (done) ->
       @execute -> atom.unloadEditorWindow()
-      .execute -> require("electron").remote.app.emit("before-quit")
+      .execute -> require("remote").require("app").emit("before-quit")
       .call(done)
 
 module.exports = (args, env, fn) ->

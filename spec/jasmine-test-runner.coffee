@@ -1,7 +1,7 @@
 _ = require 'underscore-plus'
 fs = require 'fs-plus'
 path = require 'path'
-{ipcRenderer} = require 'electron'
+ipc = require 'ipc'
 
 module.exports = ({logFile, headless, testPaths, buildAtomEnvironment}) ->
   window[key] = value for key, value of require '../vendor/jasmine'
@@ -88,7 +88,7 @@ buildTerminalReporter = (logFile, resolveWithExitCode) ->
     if logStream?
       fs.writeSync(logStream, str)
     else
-      ipcRenderer.send 'write-to-stderr', str
+      ipc.send 'write-to-stderr', str
 
   {TerminalReporter} = require 'jasmine-tagged'
   new TerminalReporter

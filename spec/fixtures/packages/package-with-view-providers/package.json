@@ -3,10 +3,10 @@
   "main": "./index",
   "version": "1.0.0",
   "deserializers": {
-    "DeserializerFromPackageWithViewProviders": "theDeserializerMethod"
+    "DeserializerFromPackageWithViewProviders": "./deserializer"
   },
   "viewProviders": [
-    "viewProviderMethod1",
-    "viewProviderMethod2"
+    "./view-provider-1",
+    "./view-provider-2"
   ]
 }

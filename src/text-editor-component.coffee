@@ -2,7 +2,7 @@ _ = require 'underscore-plus'
 scrollbarStyle = require 'scrollbar-style'
 {Range, Point} = require 'text-buffer'
 {CompositeDisposable} = require 'event-kit'
-{ipcRenderer} = require 'electron'
+ipc = require 'ipc'
 
 TextEditorPresenter = require './text-editor-presenter'
 GutterContainerComponent = require './gutter-container-component'
@@ -43,7 +43,7 @@ class TextEditorComponent
       @assert domNode?, "TextEditorComponent::domNode was set to null."
       @domNodeValue = domNode
 
-  constructor: ({@editor, @hostElement, @rootElement, @stylesElement, @useShadowDOM, tileSize, @views, @themes, @config, @workspace, @assert, @grammars, scrollPastEnd}) ->
+  constructor: ({@editor, @hostElement, @rootElement, @stylesElement, @useShadowDOM, tileSize, @views, @themes, @config, @workspace, @assert, @grammars}) ->
     @tileSize = tileSize if tileSize?
     @disposables = new CompositeDisposable
 
@@ -61,7 +61,6 @@ class TextEditorComponent
       stoppedScrollingDelay: 200
       config: @config
       lineTopIndex: lineTopIndex
-      scrollPastEnd: scrollPastEnd
 
     @presenter.onDidUpdateState(@requestUpdate)
 
@@ -280,10 +279,10 @@ class TextEditorComponent
     writeSelectedTextToSelectionClipboard = =>
       return if @editor.isDestroyed()
       if selectedText = @editor.getSelectedText()
-        # This uses ipcRenderer.send instead of clipboard.writeText because
-        # clipboard.writeText is a sync ipcRenderer call on Linux and that
+        # This uses ipc.send instead of clipboard.writeText because
+        # clipboard.writeText is a sync ipc call on Linux and that
         # will slow down selections.
-        ipcRenderer.send('write-text-to-selection-clipboard', selectedText)
+        ipc.send('write-text-to-selection-clipboard', selectedText)
     @disposables.add @editor.onDidChangeSelectionRange ->
       clearTimeout(timeoutId)
       timeoutId = setTimeout(writeSelectedTextToSelectionClipboard)

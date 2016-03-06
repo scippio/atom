@@ -15,8 +15,7 @@ class WindowEventHandler
     @addEventListener(@window, 'focus', @handleWindowFocus)
     @addEventListener(@window, 'blur', @handleWindowBlur)
 
-    @addEventListener(@document, 'keyup', @handleDocumentKeyEvent)
-    @addEventListener(@document, 'keydown', @handleDocumentKeyEvent)
+    @addEventListener(@document, 'keydown', @handleDocumentKeydown)
     @addEventListener(@document, 'drop', @handleDocumentDrop)
     @addEventListener(@document, 'dragover', @handleDocumentDragover)
     @addEventListener(@document, 'contextmenu', @handleDocumentContextmenu)
@@ -67,7 +66,7 @@ class WindowEventHandler
     target.addEventListener(eventName, handler)
     @subscriptions.add(new Disposable(-> target.removeEventListener(eventName, handler)))
 
-  handleDocumentKeyEvent: (event) =>
+  handleDocumentKeydown: (event) =>
     @atomEnvironment.keymaps.handleKeyboardEvent(event)
     event.stopImmediatePropagation()
 
@@ -134,7 +133,7 @@ class WindowEventHandler
 
   handleWindowBlur: =>
     @document.body.classList.add('is-blurred')
-    @atomEnvironment.storeWindowDimensions()
+    @atomEnvironment.storeDefaultWindowDimensions()
 
   handleWindowBeforeunload: =>
     confirmed = @atomEnvironment.workspace?.confirmClose(windowCloseRequested: true)
@@ -142,8 +141,8 @@ class WindowEventHandler
       @atomEnvironment.hide()
     @reloadRequested = false
 
+    @atomEnvironment.storeDefaultWindowDimensions()
     @atomEnvironment.storeWindowDimensions()
-    @atomEnvironment.saveState()
     if confirmed
       @atomEnvironment.unloadEditorWindow()
     else
